@@ -1,0 +1,125 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+
+
+#define MAX 2000
+
+char* readInput();         // function prototype
+
+char* readInput(){
+    printf("Enter your input here: \n");
+    char *buf = malloc(sizeof(char)*2000);
+    return fgets(buf, MAX, stdin);
+}
+
+void writeToFile(char *copyString, char cwd[]){
+    char *token = strtok(copyString, "|");
+    FILE *fptr = fopen(cwd, "a");
+    while(token != NULL){
+        fprintf(fptr,"%s\n",token);
+        token = strtok(NULL, "|");
+    }
+    fclose(fptr);
+}
+
+int checkEmpty(char line[]){
+    if(line[0] == '\n'){
+        return 1;
+    }
+    return 0;
+}
+
+void executeFirst(char line[], int fd[2]){
+    //int fd[2];
+    printf("line: %s\n", line);
+    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
+    int pid;
+    pid = fork();//Fork into parent/Child
+    if (pid> 0 ) {//Parent
+        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+    }
+    else {//Child
+        dup2(fd,STDOUT_FILENO);
+        close(fd[0]);
+        close(fd[1]);
+        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
+    }
+}
+
+void executeUneven(char line[], int fd[]){
+    printf("line: %s\n", line);
+    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
+    int pid;
+    pid = fork();//Fork into parent/Child
+    if (pid> 0 ) {//Parent
+        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+    }
+    else {//Child
+        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
+    }
+}
+
+void executeEven(char line[], int fd[]){
+    printf("line: %s\n", line);
+    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
+    int pid;
+    pid = fork();//Fork into parent/Child
+    if (pid> 0 ) {//Parent
+        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+    }
+    else {//Child
+        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
+    }
+}
+
+void Execute(char cwd[]){
+    int fd[2];
+    pipe(fd);
+
+    FILE* file = fopen(cwd, "r");
+    char line[2048];
+    int counter = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if(!checkEmpty(line)){
+            if(counter==0){
+                printf("counter should be 0: %d\n", counter);
+                executeFirst(line, fd);
+            }
+            else if(counter%2==1){
+                printf("counter should be uneven: %d\n", counter);
+                executeUneven(line, fd);
+            }
+            else if(counter%2==0){
+                printf("counter should be even, but not 0: %d\n", counter);
+                executeEven(line, fd);
+            }
+            counter++;
+            //printf("%s", line);
+        }
+    }
+
+    fclose(file);
+}
+
+int main() {
+    char cwd[200];
+    getcwd(cwd, sizeof(cwd));
+    strcat(cwd,"/text.txt");
+
+    char *copyString = malloc(sizeof(char)*2000);
+    while(1){
+        strcpy(copyString, readInput());
+        if(strcmp(copyString, "exit\n") == 0){
+            break;
+        }
+        fclose(fopen(cwd, "w"));
+        writeToFile(copyString, cwd);
+        Execute(cwd);
+    }
+
+    return 0;
+}
