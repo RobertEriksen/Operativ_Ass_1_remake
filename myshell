@@ -3,12 +3,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
-#include <fcntl.h>
-
 
 #define MAX 2000
 
-char* readInput();         // function prototype
+int fd[2];
 
 char* readInput(){
     printf("Enter your input here: \n");
@@ -26,6 +24,18 @@ void writeToFile(char *copyString, char cwd[]){
     fclose(fptr);
 }
 
+int getSizeOfFile(char cwd[]){
+    int counter = 0;
+    char line[2048];
+    FILE* file = fopen(cwd, "r");
+
+    while (fgets(line, sizeof(line), file)) {
+        counter++;
+    }
+    fclose(file);
+    return counter-1;
+}
+
 int checkEmpty(char line[]){
     if(line[0] == '\n'){
         return 1;
@@ -33,25 +43,38 @@ int checkEmpty(char line[]){
     return 0;
 }
 
-void executeFirst(char line[], int fd[2]){
-    //int fd[2];
-    printf("line: %s\n", line);
+void executeFirst(char line[], int sizeofFile){
     char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
     int pid;
+
     pid = fork();//Fork into parent/Child
     if (pid> 0 ) {//Parent
         pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
     }
     else {//Child
-        dup2(fd,STDOUT_FILENO);
+        if(sizeofFile==2){dup2(fd[1], STDOUT_FILENO);}
+        execvp(argv[0], argv);
+    }
+}
+
+void executeUneven(char line[]){
+    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
+    int pid;
+    pid = fork();//Fork into parent/Child
+    if (pid> 0 ) {//Parent
         close(fd[0]);
         close(fd[1]);
-        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
+
+        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+    }
+    else {//Child
+        close(fd[1]);
+        dup2(fd[0], STDIN_FILENO);
+        execvp(argv[0], argv);
     }
 }
 
-void executeUneven(char line[], int fd[]){
-    printf("line: %s\n", line);
+void executeEven(char line[]){
     char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
     int pid;
     pid = fork();//Fork into parent/Child
@@ -59,53 +82,35 @@ void executeUneven(char line[], int fd[]){
         pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
     }
     else {//Child
-        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
+        execvp(argv[0], argv);
     }
 }
 
-void executeEven(char line[], int fd[]){
-    printf("line: %s\n", line);
-    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
-    int pid;
-    pid = fork();//Fork into parent/Child
-    if (pid> 0 ) {//Parent
-        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
-    }
-    else {//Child
-        execvp(argv[0], argv);//If it is NULL, there was no piped input and a normal exec can be called
-    }
-}
-
-void Execute(char cwd[]){
-    int fd[2];
-    pipe(fd);
-
+void Execute(char cwd[], int sizeofFile){
     FILE* file = fopen(cwd, "r");
     char line[2048];
     int counter = 0;
     while (fgets(line, sizeof(line), file)) {
         if(!checkEmpty(line)){
             if(counter==0){
-                printf("counter should be 0: %d\n", counter);
-                executeFirst(line, fd);
+                executeFirst(line, sizeofFile);
             }
             else if(counter%2==1){
-                printf("counter should be uneven: %d\n", counter);
-                executeUneven(line, fd);
+                executeUneven(line);
             }
             else if(counter%2==0){
-                printf("counter should be even, but not 0: %d\n", counter);
-                executeEven(line, fd);
+                //executeEven(line);
+                printf("More than one pipe not implemented\n");
+                break;
             }
             counter++;
-            //printf("%s", line);
         }
     }
-
     fclose(file);
 }
 
 int main() {
+    pipe(fd);
     char cwd[200];
     getcwd(cwd, sizeof(cwd));
     strcat(cwd,"/text.txt");
@@ -118,8 +123,8 @@ int main() {
         }
         fclose(fopen(cwd, "w"));
         writeToFile(copyString, cwd);
-        Execute(cwd);
+        int sizeofFile = getSizeOfFile(cwd);
+        Execute(cwd,sizeofFile);
     }
-
     return 0;
 }
