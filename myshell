@@ -4,127 +4,182 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define MAX 2000
+char *fileName = "/LeftAndRightSide.txt";
+char *fileNameLeftSide = "/leftSide.txt";
+char *fileNameRightSide = "/rightSide.txt";
 
-int fd[2];
+char* readInput();
+char *getFullFilePath(char fn[]);
+void clearFile(char fn[]);
+int writeToFileAndGetSize(char *copyString, char fn[], char delimeter[]);
+int checkEmpty(char line[]);
+void withoutPipe(char line[]);
+void withPipe(int sizeofFileLeft, int sizeofFileRight);
+void Execute(int sizeofFile);
 
+
+// Function to read input from the user through standard input
 char* readInput(){
-    printf("Enter your input here: \n");
-    char *buf = malloc(sizeof(char)*2000);
-    return fgets(buf, MAX, stdin);
+    printf("Enter your input here: \n"); // prints greeting
+    char *buf = malloc(sizeof(char)*2000); // prepares buffer memory allocation
+    return fgets(buf, 128, stdin); // returns the input
 }
 
-void writeToFile(char *copyString, char cwd[]){
-    char *token = strtok(copyString, "|");
-    FILE *fptr = fopen(cwd, "a");
-    while(token != NULL){
-        fprintf(fptr,"%s\n",token);
-        token = strtok(NULL, "|");
+char *getFullFilePath(char fn[]){
+    char *cwd[256];
+    getcwd(cwd, sizeof(cwd));
+    strcat(cwd,fn);
+    return cwd;
+}
+
+void clearFile(char fn[]){
+    fclose(fopen(getFullFilePath(fn), "w"));
+}
+
+//Function made to easily check if a line solely consists of a newline, in which case it is deemed empty
+int checkEmpty(char line[]){
+    if(line[0] == '\n'){ // Checks if first element is a newline, since that means nothing more is in that line
+        return 1;//returns true if it is only a newline
     }
-    fclose(fptr);
+    return 0; // The first element was something else than a newline, and it is deemed not empty
 }
 
-int getSizeOfFile(char cwd[]){
+// Function to split a string by "|" delimeter and writes it to newly created file
+int writeToFileAndGetSize(char *copyString, char fn[], char delimeter[]){
+    char cwd[256];
+    getcwd(cwd, sizeof(cwd));
+    strcat(cwd,fn);
     int counter = 0;
+    char *token = strtok(copyString, delimeter); // Splits the string input by each "|" character
+    FILE *fptr = fopen(cwd, "a"); // Prepares to append text to file
+    while(token != NULL){ // Loop that continues until there's no more lines in the input
+        fprintf(fptr,"%s\n",token); // prints the split line and ends it with a newline
+        token = strtok(NULL, delimeter); // Continues to next split delimeter
+        counter++;
+    }
+    fclose(fptr);//File manipulation is done and it closes the file
+    return counter;
+}
+
+//Function for specifically running the first command in the pipe. It forks into a child, which executes the command
+// and terminates. If there is a piping command, determined by
+void withoutPipe(char line[]){
+    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
+
+    int pid = fork();//Fork into parent/Child
+    if (pid> 0 ) {//Parent
+        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+    }
+    else {//Child
+        execvp(argv[0], argv);
+    }
+}
+
+void withPipe(int sizeofFileLeft, int sizeofFileRight) {
+    int counter = 0;
+    char *argsLeft[sizeofFileLeft+1];
+    char *argsRight[sizeofFileRight+1];
     char line[2048];
-    FILE* file = fopen(cwd, "r");
+
+    FILE* fileLeft = fopen(getFullFilePath(fileNameLeftSide), "r");
+    while (fgets(line, sizeof(line), fileLeft)) {
+        if(!checkEmpty(line)){
+            line[strcspn(line, "\n")] = 0;
+            argsLeft[counter] = strdup(line);
+            counter++;
+        }
+    }
+    fclose(fileLeft);
+    argsLeft[counter] = NULL;
+
+    counter=0;
+    FILE* fileRight = fopen(getFullFilePath(fileNameRightSide), "r");
+    while (fgets(line, sizeof(line), fileRight)) {
+        if(!checkEmpty(line)){
+            line[strcspn(line, "\n")] = 0;
+            argsRight[counter] = strdup(line);
+            counter++;
+        }
+    }
+    fclose(fileRight);
+    argsRight[counter] = NULL;
+
+    int fd[2];
+    pipe(fd);
+
+    int pid1 = fork();//Fork into parent/Child
+    if (pid1 > 0) {//Grand Parent
+        pid1 = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+
+        int pid2 = fork();//Fork into parent/Child
+        if (pid2 > 0) {//Parent
+            close(fd[0]);
+            close(fd[1]);
+            pid2 = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
+
+
+        } else {// Child
+            dup2(fd[0], STDIN_FILENO); //copy input end (0) from console, to the read of the pipe
+            close(fd[1]); //close write end
+            execvp (argsRight[0],argsRight);
+        }
+    }
+    else {//Grand Child
+        dup2(fd[1], STDOUT_FILENO); //copy output end (1) to console, to the write of the pipe
+        close(fd[0]); //close read end
+        execvp(argsLeft[0],argsLeft);
+    }
+}
+
+void Execute(int sizeofFile){
+    clearFile(fileNameLeftSide);
+    clearFile(fileNameRightSide);
+    FILE* file = fopen(getFullFilePath(fileName), "r");
+
+    char line[128];
+    int counter = 0;
+
+    char *copyLineLeft = malloc(sizeof(char)*128);
+    char *copyLineRight = malloc(sizeof(char)*128);
+
+    int sizeofFileLeft;
+    int sizeofFileRight;
 
     while (fgets(line, sizeof(line), file)) {
         counter++;
-    }
-    fclose(file);
-    return counter-1;
-}
-
-int checkEmpty(char line[]){
-    if(line[0] == '\n'){
-        return 1;
-    }
-    return 0;
-}
-
-void executeFirst(char line[], int sizeofFile){
-    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
-    int pid;
-
-    pid = fork();//Fork into parent/Child
-    if (pid> 0 ) {//Parent
-        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
-    }
-    else {//Child
-        if(sizeofFile==2){dup2(fd[1], STDOUT_FILENO);}
-        execvp(argv[0], argv);
-    }
-}
-
-void executeUneven(char line[]){
-    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
-    int pid;
-    pid = fork();//Fork into parent/Child
-    if (pid> 0 ) {//Parent
-        close(fd[0]);
-        close(fd[1]);
-
-        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
-    }
-    else {//Child
-        close(fd[1]);
-        dup2(fd[0], STDIN_FILENO);
-        execvp(argv[0], argv);
-    }
-}
-
-void executeEven(char line[]){
-    char *argv[] = { "sh", "-c", line, 0 }; //Initialize arguments for exec
-    int pid;
-    pid = fork();//Fork into parent/Child
-    if (pid> 0 ) {//Parent
-        pid = wait(NULL);//Parent does nothing but waiting for child to finish and return to the while loop
-    }
-    else {//Child
-        execvp(argv[0], argv);
-    }
-}
-
-void Execute(char cwd[], int sizeofFile){
-    FILE* file = fopen(cwd, "r");
-    char line[2048];
-    int counter = 0;
-    while (fgets(line, sizeof(line), file)) {
         if(!checkEmpty(line)){
-            if(counter==0){
-                executeFirst(line, sizeofFile);
-            }
-            else if(counter%2==1){
-                executeUneven(line);
-            }
-            else if(counter%2==0){
-                //executeEven(line);
-                printf("More than one pipe not implemented\n");
+            if(sizeofFile==1){
+                withoutPipe(line);
+            }else if(sizeofFile==2){
+                if(counter==1){
+                    strcpy(copyLineLeft, line);
+                    sizeofFileLeft = writeToFileAndGetSize(copyLineLeft, fileNameLeftSide, " ");
+                }
+                else if(counter==2){
+                    strcpy(copyLineRight, line);
+                    sizeofFileRight = writeToFileAndGetSize(copyLineRight, fileNameRightSide, " ");
+
+                    withPipe(sizeofFileLeft, sizeofFileRight);
+                    }
+            }else{
                 break;
             }
-            counter++;
         }
     }
     fclose(file);
 }
 
 int main() {
-    pipe(fd);
-    char cwd[200];
-    getcwd(cwd, sizeof(cwd));
-    strcat(cwd,"/text.txt");
-
-    char *copyString = malloc(sizeof(char)*2000);
+    char *readInputCopy = malloc(sizeof(char) * 128);
     while(1){
-        strcpy(copyString, readInput());
-        if(strcmp(copyString, "exit\n") == 0){
+        strcpy(readInputCopy, readInput());
+        if(strcmp(readInputCopy, "exit\n") == 0){
             break;
         }
-        fclose(fopen(cwd, "w"));
-        writeToFile(copyString, cwd);
-        int sizeofFile = getSizeOfFile(cwd);
-        Execute(cwd,sizeofFile);
+        clearFile(fileName);
+        int sizeofFile = writeToFileAndGetSize(readInputCopy, fileName, "|");
+        Execute(sizeofFile);
     }
+
     return 0;
 }
